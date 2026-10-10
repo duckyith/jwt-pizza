@@ -35,7 +35,21 @@ Imagine you have only 1 test that tries the age 20. The test expects to return t
 
 ## Experiment I conducted (with reproduction path)
 
-I decided to run mutatnts on our jwt-pizza project. I wasn't going to go through and solve all of them but I wanted to run in and evaluate why they were surviving. The following is what it looked like running:
+I decided to run mutatnts on our jwt-pizza project. I wasn't going to go through and solve all of them but I wanted to run in and evaluate why they were surviving. Here are the steps for how this can be reproduced:
+
+1. In the directory where you run your tests so jwt-pizza-service run this "npm install --save-dev @stryker-mutator/core @stryker-mutator/jest-runner"
+
+2. Next, in the same place run this "npx stryker init" and select the options that make sense for the project (jest, js etc.)
+
+3. Now, open the new stryker.config.mjs and add this on the bottom (before the bracket close)
+
+```js
+mutate": ["src/**/*.js", "!src/tests/**/*.js"]
+```
+
+4. Finally to use run "npx stryker run"
+
+The following is what it looked like running:
 
 ![Experiment picture](mutants.png)
 
