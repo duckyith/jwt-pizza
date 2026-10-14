@@ -11,38 +11,44 @@ permissions:
   contents: read  # Required for actions/checkout
 
 jobs:
-  # build:
-  #   name: Build
-  #   runs-on: ubuntu-latest
-  #   outputs:
-  #     version: ${{ steps.set_version.outputs.version }}
-  #   steps:
-  #     - name: Checkout repo
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup Node
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: '22.x'
-
-  #     - name: set version
-  #       id: set_version
-  #       run: |
-  #         version=$(date +'%Y%m%d.%H%M%S')
-  #         echo "version=$version" >> "$GITHUB_OUTPUT"
-  #         printf '{"version": "%s" }' "$version" > public/version.json
-
-  #     - name: Build
-  #       run: |
-  #         npm ci && npm run build
-  #         cp dist/index.html dist/404.html
-
-  #     - name: Update pages artifact
-  #       uses: actions/upload-pages-artifact@v3
-  #       with:
-  #         path: dist/
-  deploy:
+  build:
+    name: Build
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set_version.outputs.version }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: set version
+        id: set_version
+        run: |
+          version=$(date +'%Y%m%d.%H%M%S')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          printf '{"version": "%s" }' "$version" > public/version.json
+
+      - name: Build
+        run: |
+          npm ci && npm run build
+          cp dist/index.html dist/404.html
+
+      - name: Update dist artifact
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: package
+          path: dist/
+  deploy:
+    needs: build
+    permissions:
+      id-token: write
+    runs-on: ubuntu-latest
+    env:
+      version: ${{needs.build.outputs.version}}
     steps:
       - name: Create OIDC token to AWS
         uses: aws-actions/configure-aws-credentials@v6.3.0
@@ -51,9 +57,14 @@ jobs:
           aws-region: us-east-1
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT }}:role/${{ secrets.CI_IAM_ROLE }}
 
+      - name: Download dist artifact
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: package
+          path: dist/
+
       - name: Push to AWS S3
         run: |
-          mkdir dist
-          printf "<h1>CloudFront deployment with GitHub Actions</h1>" > dist/index.html
+          echo Deploying $version
           aws s3 cp dist s3://${{ secrets.APP_BUCKET }} --recursive
           aws cloudfront create-invalidation --distribution-id ${{ secrets.DISTRIBUTION_ID }} --paths "/*"
