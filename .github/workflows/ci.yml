@@ -41,6 +41,14 @@ jobs:
           npx playwright install --with-deps chromium
           npm run test:coverage
 
+      - name: Update coverage
+        run: |
+          coverage=$(jq '.total.lines.pct' coverage/coverage-summary.json)
+          color=$(echo "$coverage < 80" | bc | awk '{if ($1) print "red"; else print "green"}')
+          result=$(curl -s -o /dev/null -w '%{http_code}\n' curl -s -X POST "https://pizza-factory.cs329.click/api/badge/${{ secrets.NET_ID }}/jwtpizzacoverage?label=Coverage&value=$coverage%25&color=$color" -H "authorization: bearer ${{ secrets.FACTORY_API_KEY }}")
+          [[ "$result" == 200 ]] || { echo "Badge generation failed: HTTP $result" >&2; exit 1; }
+          
+
       - name: Update dist artifact
         uses: actions/upload-artifact@v7.0.2
         with:
