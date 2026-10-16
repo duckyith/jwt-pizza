@@ -402,3 +402,203 @@ test('dinerDashboard', async ({ page }) => {
   await page.getByRole('link', { name: 'pd' }).click();
   await expect(page.getByRole('heading')).toContainText('Your pizza kitchen');
 });
+
+test('unknown page and docs', async ({ page }) => {
+  await page.goto('/');
+  await page.goto('/befuao');
+
+  await expect(page.getByRole('main')).toContainText(
+    'It looks like we have dropped a pizza on the floor. Please try another page.'
+  );
+
+  await page.route('**/api/docs', async (route) => {
+    await route.fulfill({
+      json: {
+        version: 'test',
+        endpoints: [
+          {
+            method: 'POST',
+            path: '/api/auth',
+            description: 'Register a user',
+            example:
+              `curl -X POST localhost:3000/api/auth -d '{"name":"pizza diner", "email":"d@jwt.com", "password":"diner"}' -H 'Content-Type: application/json'`,
+          },
+        ],
+        config: {
+          factory: { url: 'http://localhost:3001' },
+          db: { connection: { host: 'localhost' } },
+        },
+      },
+    });
+  });
+
+  await page.goto('/docs');
+
+  await expect(page.getByRole('main')).toContainText('JWT Pizza API');
+  await expect(page.getByRole('heading', { name: '[POST] /api/auth' })).toBeVisible();
+
+  await page.getByRole('heading', { name: '[POST] /api/auth' }).click();
+
+  await expect(page.getByText('Example request').first()).toBeVisible();
+
+  await expect(page.getByRole('main')).toContainText(
+    `curl -X POST localhost:3000/api/auth -d '{"name":"pizza diner", "email":"d@jwt.com", "password":"diner"}' -H 'Content-Type: application/json'`
+  );
+});
+
+test('more docs and dashboard', async ({ page }) => {
+  const diner = {
+    id: '3',
+    name: 'Pizza Diner',
+    email: 'd@jwt.com',
+    roles: [{ role: Role.Diner }],
+  };
+
+  await page.route('**/api/docs', async (route) => {
+    await route.fulfill({
+      json: {
+        version: 'test',
+        endpoints: [
+          {
+            method: 'DELETE',
+            path: '/api/franchise/:franchiseId/store/:storeId',
+            description: 'Close a store',
+            requiresAuth: true,
+            example:
+              "curl -X DELETE localhost:3000/api/franchise/1/store/1 -H 'Authorization: Bearer tttttt'",
+          },
+        ],
+        config: {
+          factory: { url: 'http://localhost:3001' },
+          db: { connection: { host: 'localhost' } },
+        },
+      },
+    });
+  });
+
+  await page.route('**/api/auth', async (route) => {
+    if (route.request().method() === 'PUT') {
+      await route.fulfill({
+        json: { user: diner, token: 'diner-token' },
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.route('**/api/user/me', async (route) => {
+    await route.fulfill({ json: diner });
+  });
+
+  await page.route('**/api/order', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        json: {
+          orders: [
+            {
+              id: '1',
+              items: [{ price: 0.004 }],
+              date: '2026-10-16T12:00:00.000Z',
+            },
+          ],
+        },
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await page.goto('/docs');
+
+  await expect(page.getByRole('main')).toContainText(
+    '[DELETE] /api/franchise/:franchiseId/store/:storeId'
+  );
+  await expect(page.getByRole('main')).toContainText(
+    "curl -X DELETE localhost:3000/api/franchise/1/store/1 -H 'Authorization: Bearer tttttt'"
+  );
+
+  await page.getByRole('link', { name: 'Login' }).click();
+  await page.getByRole('textbox', { name: 'Email address' }).fill('d@jwt.com');
+  await page.getByRole('textbox', { name: 'Password' }).fill('diner');
+  await page.getByRole('textbox', { name: 'Password' }).press('Enter');
+
+  await page.getByRole('link', { name: 'pd' }).click();
+  await expect(page.locator('thead')).toContainText('Date');
+  await page.getByRole('img', { name: 'Employee stock photo' }).click();
+});
+
+
+test('verify valid and invalid JWT', async ({ page }) => {
+  await page.route('**/api/order/verify', async (route) => {
+    const body = route.request().postDataJSON();
+
+    if (body.jwt === 'valid-token') {
+      await route.fulfill({
+        json: {
+          message: 'valid',
+          payload: { id: '3' },
+        },
+      });
+    } else {
+      await route.fulfill({
+        status: 401,
+        json: { message: 'invalid JWT' },
+      });
+    }
+  });
+
+  await page.goto('/');
+
+  await page.evaluate(() => {
+    window.history.replaceState(
+      {
+        usr: {
+          order: { id: '1', items: [] },
+          jwt: 'valid-token',
+        },
+        key: 'test-key',
+        idx: 0,
+      },
+      '',
+      '/delivery'
+    );
+  });
+
+  await page.reload();
+
+  await expect(
+    page.getByRole('heading', { name: 'Here is your JWT Pizza!' })
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Verify' }).click();
+
+  await expect(
+    page.getByRole('heading', { name: /JWT Pizza - valid/ })
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Close' }).click();
+
+  await page.evaluate(() => {
+    window.history.replaceState(
+      {
+        usr: {
+          order: { id: '1', items: [] },
+          jwt: 'invalid-token',
+        },
+        key: 'test-key',
+        idx: 0,
+      },
+      '',
+      '/delivery'
+    );
+  });
+
+  await page.reload();
+
+  await page.getByRole('button', { name: 'Verify' }).click();
+
+  await expect(
+    page.getByRole('heading', { name: /JWT Pizza - invalid/ })
+  ).toBeVisible();
+});
