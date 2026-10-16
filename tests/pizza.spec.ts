@@ -295,3 +295,110 @@ test('franchise with franchisee', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Close' }).click();
 });
+
+test('register stuff', async ({ page }) => {
+  const registeredUser = {
+    id: '8',
+    name: 'registeree',
+    email: 're@jwt.com',
+    roles: [{ role: Role.Diner }],
+  };
+
+  await page.route('**/api/auth', async (route) => {
+    const request = route.request();
+
+    if (request.method() === 'POST') {
+      expect(request.postDataJSON()).toMatchObject({
+        name: 'registeree',
+        email: 're@jwt.com',
+        password: 'registeree',
+      });
+
+      await route.fulfill({
+        json: { user: registeredUser, token: 'register-token' },
+      });
+      return;
+    }
+
+    if (request.method() === 'DELETE') {
+      await route.fulfill({ json: {} });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.route('**/api/user/me', async (route) => {
+    await route.fulfill({ json: registeredUser });
+  });
+
+  await page.goto('/');
+
+  await page.getByRole('link', { name: 'Register' }).click();
+  await page.getByRole('textbox', { name: 'Full name' }).fill('registeree');
+  await page.getByRole('textbox', { name: 'Email address' }).fill('re@jwt.com');
+  await page.getByRole('textbox', { name: 'Password' }).fill('registeree');
+  await page.getByRole('button', { name: 'Register' }).click();
+
+  await expect(page.getByRole('link', { name: 'r', exact: true })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Logout' }).click();
+
+  await expect(page.getByRole('navigation', { name: 'Global' }))
+    .toContainText('JWT PizzaOrderFranchiseLoginRegister');
+});
+
+test('dinerDashboard', async ({ page }) => {
+  const diner = {
+    id: '3',
+    name: 'Pizza Diner',
+    email: 'd@jwt.com',
+    roles: [{ role: Role.Diner }],
+  };
+
+  await page.route('**/api/auth', async (route) => {
+    if (route.request().method() === 'PUT') {
+      await route.fulfill({
+        json: { user: diner, token: 'diner-token' },
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.route('**/api/user/me', async (route) => {
+    await route.fulfill({ json: diner });
+  });
+
+  await page.route('**/api/order', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        json: {
+          id: '3',
+          dinerId: '3',
+          orders: [],
+        },
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.goto('/');
+
+  await page.getByRole('link', { name: 'About' }).click();
+  await expect(page.getByRole('main')).toContainText('The secret sauce');
+
+  await page.getByRole('link', { name: 'History' }).click();
+  await expect(page.getByRole('heading')).toContainText('Mama Rucci, my my');
+
+  await page.getByRole('link', { name: 'Login' }).click();
+  await page.getByRole('textbox', { name: 'Email address' }).fill('d@jwt.com');
+  await page.getByRole('textbox', { name: 'Password' }).fill('diner');
+  await page.getByRole('button', { name: 'Login' }).click();
+
+  await page.getByRole('link', { name: 'pd' }).click();
+  await expect(page.getByRole('heading')).toContainText('Your pizza kitchen');
+});
