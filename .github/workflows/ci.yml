@@ -36,6 +36,11 @@ jobs:
         run: |
           npm ci && npm run build
 
+      - name: Run tests
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:coverage
+
       - name: Update dist artifact
         uses: actions/upload-artifact@v7.0.2
         with:
