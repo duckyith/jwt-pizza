@@ -79,7 +79,7 @@ test('login', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'KC' })).toBeVisible();
 });
 
-test('purchase with login', async ({ page }) => {
+test('order with login', async ({ page }) => {
   await basicInit(page);
 
   await page.getByRole('button', { name: 'Order now' }).click();
@@ -102,4 +102,196 @@ test('purchase with login', async ({ page }) => {
   await page.getByRole('button', { name: 'Pay now' }).click();
 
   await expect(page.getByText('0.008')).toBeVisible();
+});
+
+
+test('franchise as admin', async ({ page }) => {
+  const admin = {
+    id: '1',
+    name: 'Admin',
+    email: 'a@jwt.com',
+    roles: [{ role: Role.Admin }],
+  };
+
+  let franchises = [
+    {
+      id: '1',
+      name: 'pizzaPocket',
+      admins: [{ id: '1', name: 'Admin', email: 'a@jwt.com' }],
+      stores: [],
+    },
+  ];
+
+  await page.route('**/api/auth', async (route) => {
+    expect(route.request().method()).toBe('PUT');
+    await route.fulfill({
+      json: { user: admin, token: 'admin-token' },
+    });
+  });
+
+  await page.route('**/api/user/me', async (route) => {
+    await route.fulfill({ json: admin });
+  });
+
+  await page.route('**/api/franchise?*', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        json: { franchises, more: false },
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.route('**/api/franchise', async (route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON();
+      const created = {
+        id: '2',
+        name: body.name,
+        admins: body.admins,
+        stores: [],
+      };
+
+      franchises.push(created);
+      await route.fulfill({ json: created });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.route('**/api/franchise/*', async (route) => {
+    if (route.request().method() === 'DELETE') {
+      const id = route.request().url().split('/').pop();
+      franchises = franchises.filter((f) => f.id !== id);
+      await route.fulfill({
+        json: { message: 'franchise deleted' },
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Login' }).click();
+  await page.getByRole('textbox', { name: 'Email address' }).fill('a@jwt.com');
+  await page.getByRole('textbox', { name: 'Password' }).fill('admin');
+  await page.getByRole('button', { name: 'Login' }).click();
+
+  await page.getByRole('link', { name: 'Admin' }).click();
+  await expect(page.locator('tbody')).toContainText('pizzaPocket');
+
+  await page.getByRole('button', { name: 'Add Franchise' }).click();
+  await page.getByRole('textbox', { name: 'franchise name' }).fill('Orem');
+  await page.getByRole('textbox', { name: 'franchisee admin email' }).fill('a@jwt.com');
+  await page.getByRole('button', { name: 'Create' }).click();
+
+  await expect(page.getByRole('row', { name: /Orem/ })).toBeVisible();
+
+  await page.getByRole('row', { name: /Orem/ })
+    .getByRole('button')
+    .click();
+
+  await expect(page.getByRole('heading')).toContainText('Sorry to see you go');
+  await page.getByRole('button', { name: 'Close' }).click();
+});
+
+
+test('franchise with franchisee', async ({ page }) => {
+  const franchisee = {
+    id: '4',
+    name: 'Pizza Franchisee',
+    email: 'f@jwt.com',
+    roles: [{ role: Role.Franchisee, objectId: '1' }],
+  };
+
+  let stores = [
+    { id: '4', name: 'SLC', totalRevenue: 0 },
+  ];
+
+  await page.route('**/api/auth', async (route) => {
+    expect(route.request().method()).toBe('PUT');
+    await route.fulfill({
+      json: { user: franchisee, token: 'franchisee-token' },
+    });
+  });
+
+  await page.route('**/api/user/me', async (route) => {
+    await route.fulfill({ json: franchisee });
+  });
+
+  await page.route('**/api/franchise/4', async (route) => {
+    await route.fulfill({
+      json: [{
+        id: '1',
+        name: 'pizzaPocket',
+        admins: [{ id: '4', name: 'Pizza Franchisee', email: 'f@jwt.com' }],
+        stores,
+      }],
+    });
+  });
+
+  await page.route('**/api/franchise/1/store', async (route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON();
+      const store = {
+        id: '5',
+        name: body.name,
+        totalRevenue: 0,
+      };
+
+      stores.push(store);
+      await route.fulfill({ json: store });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.route('**/api/franchise/1/store/*', async (route) => {
+    if (route.request().method() === 'DELETE') {
+      const id = route.request().url().split('/').pop();
+      stores = stores.filter((store) => store.id !== id);
+
+      await route.fulfill({
+        json: { message: 'store deleted' },
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.goto('/');
+
+  await page.getByRole('navigation', { name: 'Global' })
+    .getByRole('link', { name: 'Franchise' }).click();
+
+  await expect(page.getByText('If you are already a')).toBeVisible();
+  await expect(page.getByRole('alert'))
+    .toContainText('If you are already a franchisee');
+
+  await page.getByRole('link', { name: 'login', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Email address' }).fill('f@jwt.com');
+  await page.getByRole('textbox', { name: 'Password' }).fill('franchisee');
+  await page.getByRole('textbox', { name: 'Password' }).press('Enter');
+
+  await expect(page.locator('tbody')).toContainText('SLC');
+
+  await page.getByRole('button', { name: 'Create store' }).click();
+  await page.getByRole('textbox', { name: 'store name' }).fill('Provo');
+  await page.getByRole('button', { name: 'Create' }).click();
+
+  await expect(page.getByRole('row', { name: /Provo/ })).toBeVisible();
+
+  await page.getByRole('row', { name: /Provo/ })
+    .getByRole('button').click();
+
+  await expect(page.getByRole('main'))
+    .toContainText('Are you sure you want to close the pizzaPocket store Provo');
+
+  await page.getByRole('button', { name: 'Close' }).click();
 });
